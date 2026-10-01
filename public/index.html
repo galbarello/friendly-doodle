@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Página con Iframes</title>
+  <style>
+    :root { --bg: #f4f5f7; --panel: #fff; --ink: #1f2330; --muted: #6b7280; --line: #e3e5ea; --accent: #2f6fde; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #15171c; --panel: #1e2128; --ink: #e8eaef; --muted: #9aa1ad; --line: #2c3039; --accent: #6c9cf0; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; background: var(--bg); color: var(--ink);
+           font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    .frame { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+             margin-bottom: 20px; overflow: hidden; }
+    .bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    .bar .name { font-weight: 600; }
+    .bar .path { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+    .bar .status { margin-left: auto; color: var(--muted); font-size: 12px; }
+    .bar button { border: 1px solid var(--line); background: transparent; color: var(--ink);
+                  border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+    .bar button:hover { border-color: var(--accent); color: var(--accent); }
+    .add { display: flex; gap: 8px; margin-bottom: 16px; }
+    .add input { flex: 1; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+                 background: var(--panel); color: var(--ink); font: inherit; }
+    .add button { border: 1px solid var(--line); background: transparent; color: var(--ink);
+                  border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit; }
+    iframe { display: block; width: 100%; height: 500px; border: none; background: #fff; }
+    pre { display: none; margin: 0; max-height: 360px; overflow: auto; padding: 12px;
+          border-top: 1px solid var(--line); font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+    .frame.open pre { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Página con Iframes</h1>
+  <form id="add" class="add">
+    <input name="url" type="url" placeholder="https://otro-dominio.com/pagina" required oninput="this.setCustomValidity('')">
+    <button>Agregar iframe</button>
+  </form>
+  <div id="wall"></div>
+
+  <script>
+    // Each entry is a full URL on any domain; add as many as you like (or use the form above).
+    const FRAMES = [
+      { name: "Example",   url: "https://example.com/" },
+      { name: "Wikipedia", url: "https://en.wikipedia.org/wiki/Iframe" },
+      { name: "HTTP Bin",  url: "https://httpbin.org/html" },
+    ];
+
+    // Any URL goes through the proxy as /__p/<host>/<path> (http:// gets an "http:" prefix),
+    // so every frame is same-origin with this page. A bare "/path" is used as-is.
+    function proxied(input) {
+      if (input.startsWith("/")) return input;
+      const u = new URL(input);
+      return `/__p/${u.protocol === "http:" ? "http:" : ""}${u.host}${u.pathname}${u.search}`;
+    }
+
+    const wall = document.getElementById("wall");
+
+    function addFrame(f) {
+      const box = document.createElement("section");
+      box.className = "frame";
+      box.innerHTML = `
+        <div class="bar">
+          <span class="name"></span><span class="path"></span>
+          <span class="status">cargando…</span>
+          <button data-act="toggle">Ver HTML</button>
+          <button data-act="copy">Copiar HTML</button>
+        </div>
+        <iframe title=""></iframe>
+        <pre></pre>`;
+      box.querySelector(".name").textContent = f.name;
+      box.querySelector(".path").textContent = f.url;
+      const frame = box.querySelector("iframe");
+      const status = box.querySelector(".status");
+      const pre = box.querySelector("pre");
+      frame.title = f.name;
+      // sandbox without allow-top-navigation stops frame-busting scripts (top.location = ...)
+      frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-modals");
+      frame.src = proxied(f.url);
+
+      // Same origin, so this works: read the live DOM of the page inside the iframe.
+      const innerHTML = () => frame.contentDocument?.documentElement.outerHTML ?? "";
+
+      frame.addEventListener("load", () => {
+        const doc = frame.contentDocument;
+        if (!doc) { status.textContent = "sin acceso (otro origen)"; return; }
+        status.textContent = `${doc.title || "sin título"} · ${innerHTML().length.toLocaleString()} caracteres`;
+        // grow the iframe to its content, and keep doing it as the app re-renders
+        const fit = () => { frame.style.height = Math.max(200, doc.documentElement.scrollHeight) + "px"; };
+        fit();
+        new ResizeObserver(fit).observe(doc.documentElement);
+        if (box.classList.contains("open")) pre.textContent = innerHTML();
+      });
+
+      box.querySelector(".bar").addEventListener("click", async (e) => {
+        const act = e.target.dataset.act;
+        if (act === "toggle") {
+          box.classList.toggle("open");
+          pre.textContent = innerHTML();
+          e.target.textContent = box.classList.contains("open") ? "Ocultar HTML" : "Ver HTML";
+        } else if (act === "copy") {
+          await navigator.clipboard.writeText(innerHTML());
+          e.target.textContent = "¡Copiado!";
+          setTimeout(() => (e.target.textContent = "Copiar HTML"), 1200);
+        }
+      });
+
+      wall.appendChild(box);
+    }
+
+    FRAMES.forEach(addFrame);
+
+    document.getElementById("add").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = e.target.elements.url;
+      try { new URL(input.value); } catch { input.setCustomValidity("URL inválida"); input.reportValidity(); return; }
+      addFrame({ name: new URL(input.value).host, url: input.value });
+      input.value = "";
+    });
+  </script>
+</body>
+</html>
